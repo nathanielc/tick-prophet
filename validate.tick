@@ -1,0 +1,66 @@
+// srcDB is the name of a databse for the source data.
+var srcDB = 'oss-python'
+
+// srcRP is the name of a retention policy for the source data.
+// Default is autogen
+var srcRP = 'autogen'
+
+// srcMeasurement is the name of the measurement for the source data.
+var srcMeasurement = 'star_counts'
+
+// Field is the name of the field in the measurement to be forecasted.
+var field = 'cumulative_sum'
+
+// ForecastedDB is the name of a databse from which to query the forecasted result.
+var forecastedDB = srcDB + '-forecasted'
+
+// ForecastedRP is the name of a retention policy from which to query the forecasted result.
+// Default is autogen
+var forecastedRP = 'autogen'
+
+var accuracyDB = srcDB + '-accuracy'
+
+var accuracyRP = 'autogen'
+
+var size = 30d
+
+var src = batch
+    |query('SELECT ' + field + ' as value FROM "' + srcDB + '"."' + srcRP + '"."' + srcMeasurement + '"')
+        .period(size)
+        .every(size)
+        .align()
+        .groupBy('project')
+
+var forecasted = batch
+    |query('SELECT value FROM "' + forecastedDB + '"."' + forecastedRP + '"."' + srcMeasurement + '"')
+        .period(size)
+        .every(size)
+        .align()
+        .groupBy('project', 'model')
+
+var errors = src
+    |join(forecasted)
+        .as('src', 'forecasted')
+        .on('project')
+    |eval(
+        lambda: abs(("src.value" - "forecasted.value") / "src.value")
+    )
+        .as('error')
+
+var sum_errors = errors
+    |sum('error')
+        .as('value')
+
+var count = errors
+    |count('error')
+        .as('value')
+
+sum_errors
+    |join(count)
+        .as('sum_errors', 'count')
+    |eval(lambda: float("sum_errors.value") / float("count.value"))
+        .as('mape')
+    |influxDBOut()
+        .database(accuracyDB)
+        .retentionPolicy(accuracyRP)
+        .measurement(srcMeasurement)

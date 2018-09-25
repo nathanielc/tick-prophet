@@ -1,0 +1,48 @@
+// srcDB is the name of a databse for the source data.
+var srcDB = 'oss-python'
+
+// srcRP is the name of a retention policy for the source data.
+// Default is autogen
+var srcRP = 'autogen'
+
+// srcMeasurement is the name of the measurement for the source data.
+var srcMeasurement = 'star_counts'
+
+var accuracyDB = srcDB + '-accuracy'
+
+var accuracyRP = 'autogen'
+
+var worstDB = srcDB + '-worst'
+
+var worstRP = 'autogen'
+
+var size = 30d
+
+var baseline = batch
+    |query('SELECT last(value) as value FROM "' + accuracyDB + '"."' + accuracyRP + '"."' + srcMeasurement + '"')
+        .period(size)
+        .every(size)
+        .align()
+        .groupBy('project', 'model')
+    |log()
+        .prefix('RAW')
+    |last('value')
+        .as('value')
+    |groupBy('project')
+    |flatten()
+        .on('model')
+    |log()
+        .prefix('flattened')
+    // Select only projects where the project error is greate than both other baseline errors.
+    |where(lambda: "prophet.value" > "holt.value" AND "prophet.value" > "mean.value")
+    |groupBy()
+
+baseline
+    |httpOut('baseline')
+
+baseline
+    |influxDBOut()
+        .database(worstDB)
+        .retentionPolicy(worstRP)
+        .measurement(srcMeasurement)
+        .tag('reason', 'baseline')

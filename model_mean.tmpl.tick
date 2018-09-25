@@ -1,0 +1,63 @@
+// This template queries historcal data from InfluxDB and passes it through
+// the Prophet algorithm to forecast values into the future.
+//
+// The forecasted data is stored back in InfluxDB in a new database but with the same measurement tags structure.
+
+// Interval specifies the time interval between points of the series.
+// Default: 1d
+var interval = 1d
+
+// Forecast specifies the amount of time to forecast into the future.
+var forecast = 30d
+
+// History defines the amount of historcal data to use.
+var history = 4000d
+
+// srcDB is the name of a databse for the source data.
+var srcDB string
+
+// srcRP is the name of a retention policy for the source data.
+// Default is autogen
+var srcRP = 'autogen'
+
+// srcMeasurement is the name of the measurement for the source data.
+var srcMeasurement string
+
+// whereClause is a string where clause to restrict the selected data
+var whereClause = ''
+
+// Field is the name of the field in the measurement to be forecasted.
+var field string
+
+// GroupBy is a list of tags to group by in the query.
+var groupBy = [*]
+
+// ChangepointPriorScale is used by the Prophet algorithm to determine where changepoints should be.
+// Increasing this value will make the trend more flexible.
+var changepointPriorScale = 0.05
+
+// UncertaintyIntervalWidth is a percentile for how wide the uncertainty interval should be.
+// Increasing this value increases the width of the uncertainty interval.
+var uncertaintyIntervalWidth = 0.8
+
+// ForecastedDB is the name of a databse in which to store the forecasted result.
+var forecastedDB = srcDB + '-accuracy'
+
+// ForecastedRP is the name of a retention policy in which to store the forecasted result.
+// Default is autogen
+var forecastedRP = 'autogen'
+
+var data = batch
+    |query(
+        'SELECT mean("' + field + '") as value ' + 'FROM "' + srcDB + '"."' + srcRP + '"."' + srcMeasurement + '"' + whereClause
+    )
+        .period(forecast)
+        .every(forecast)
+        .align()
+        .groupBy(time(interval), 'project')
+    |shift(forecast)
+    |influxDBOut()
+        .database(forecastedDB)
+        .retentionPolicy(forecastedRP)
+        .measurement(srcMeasurement)
+        .tag('model', 'mean')
